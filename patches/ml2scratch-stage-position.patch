@@ -1,0 +1,107 @@
+diff --git a/scratch-vm/src/extensions/scratch3_ml2scratch/index.js b/scratch-vm/src/extensions/scratch3_ml2scratch/index.js
+index cd94237..0bdc8dd 100644
+--- a/scratch-vm/src/extensions/scratch3_ml2scratch/index.js
++++ b/scratch-vm/src/extensions/scratch3_ml2scratch/index.js
+@@ -342,7 +342,9 @@ class Scratch3ML2ScratchBlocks {
+       TRANSPARENCY: this.globalVideoTransparency
+     });
+ 
+-    this.canvas = document.querySelector('canvas');
++    // Always use Scratch's renderer canvas. document.querySelector('canvas') can
++    // select an editor/preview canvas when the GUI layout changes.
++    this.canvas = this.runtime.renderer.canvas;
+ 
+     this.runtime.ioDevices.video.enableVideo().then(() => { this.input = this.runtime.ioDevices.video.provider.video });
+ 
+@@ -686,36 +688,64 @@ class Scratch3ML2ScratchBlocks {
+     return transparency;
+   }
+ 
+-  addExample1() {
++  getFeatures(util) {
++    const features = this.featureExtractor.infer(this.input);
++    if (this.input !== this.canvas) return features;
++
++    if (util && util.target && !util.target.isStage) {
++      this.stageLearningTarget = util.target;
++    }
++
++    let target = this.stageLearningTarget;
++    if (!target && this.runtime.getEditingTarget) {
++      target = this.runtime.getEditingTarget();
++    }
++    if (!target || target.isStage) {
++      target = this.runtime.targets.find(candidate =>
++        !candidate.isStage && candidate.isOriginal && candidate.visible
++      );
++    }
++    if (!target) return features;
++
++    // MobileNet is intentionally insensitive to small position changes. Add
++    // normalized Scratch coordinates so maze locations remain distinguishable.
++    const position = ml5.tf.tensor2d([[target.x / 24, target.y / 18]]);
++    const combined = ml5.tf.concat([features, position], 1);
++    features.dispose();
++    position.dispose();
++    return combined;
++  }
++
++  addExample1(args, util) {
+     this.firstTrainingWarning();
+-    let features = this.featureExtractor.infer(this.input);
++    let features = this.getFeatures(util);
+     this.knnClassifier.addExample(features, '1');
+     this.updateCounts();
+   }
+ 
+-  addExample2() {
++  addExample2(args, util) {
+     this.firstTrainingWarning();
+-    let features = this.featureExtractor.infer(this.input);
++    let features = this.getFeatures(util);
+     this.knnClassifier.addExample(features, '2');
+     this.updateCounts();
+   }
+ 
+-  addExample3() {
++  addExample3(args, util) {
+     this.firstTrainingWarning();
+-    let features = this.featureExtractor.infer(this.input);
++    let features = this.getFeatures(util);
+     this.knnClassifier.addExample(features, '3');
+     this.updateCounts();
+   }
+ 
+-  train(args) {
++  train(args, util) {
+     this.firstTrainingWarning();
+-    let features = this.featureExtractor.infer(this.input);
++    let features = this.getFeatures(util);
+     this.knnClassifier.addExample(features, args.LABEL);
+     this.updateCounts();
+   }
+ 
+-  trainAny(args) {
+-    this.train(args);
++  trainAny(args, util) {
++    this.train(args, util);
+   }
+ 
+   getLabel() {
+@@ -958,7 +988,7 @@ class Scratch3ML2ScratchBlocks {
+     let numLabels = this.knnClassifier.getNumLabels();
+     if (numLabels == 0) return;
+ 
+-    let features = this.featureExtractor.infer(this.input);
++    let features = this.getFeatures();
+     this.knnClassifier.classify(features, (err, result) => {
+       if (err) {
+         console.error(err);
+@@ -976,6 +1006,7 @@ class Scratch3ML2ScratchBlocks {
+ 
+     for (let label in confidences) {
+       if (confidences[label] > topConfidence) {
++        topConfidence = confidences[label];
+         topConfidenceLabel = label;
+       }
+     }
